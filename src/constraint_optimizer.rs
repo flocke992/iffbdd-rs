@@ -50,7 +50,8 @@
 
 pub mod constr_optim {
     extern crate openblas_src;
-    use cblas::{Layout, Transpose, daxpy, dcopy, ddot, dgemv, dger, dscal};
+    //ToDo: use cblas::{Layout, Transpose, daxpy, dcopy, ddot, dgemv, dger, dscal};
+    use blas::{daxpy, dcopy, ddot, dgemv, dger, dscal};
     use core::f64;
     use std::error::Error;
     use std::fmt;
@@ -219,8 +220,7 @@ pub mod constr_optim {
             unsafe {
                 // temp_vec = v_x @ a_i^T
                 dgemv(
-                    Layout::RowMajor,
-                    Transpose::None,
+                    b'N',
                     self.k,
                     self.k,
                     1.0,
@@ -259,18 +259,7 @@ pub mod constr_optim {
                     );
                     //update v_x
                     //v_x = v_x - g * (v_x @ a_i^T) @ (v_x @ a_i^T)^T
-                    dger(
-                        Layout::RowMajor,
-                        self.k,
-                        self.k,
-                        -g,
-                        temp_vec,
-                        1,
-                        temp_vec,
-                        1,
-                        v_x,
-                        self.k,
-                    );
+                    dger(self.k, self.k, -g, temp_vec, 1, temp_vec, 1, v_x, self.k);
                 }
             }
         }

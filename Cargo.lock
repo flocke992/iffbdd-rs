@@ -39,36 +39,36 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4512299f36f043ab09a583e57bceb5a5aab7a73db1805848e8fef3c9e8c78b3"
 
 [[package]]
-name = "bytes"
-version = "1.11.1"
+name = "blas"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
-
-[[package]]
-name = "cblas"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7c834e5b5c32a6dbcdb917788d0c38473e1ae7076ff2f4011eb96c5fec20eef"
+checksum = "280f3f48ac4edf086d59c7aa71fb28b78df2b14db8f591fb4eb29b88b77ac6ad"
 dependencies = [
- "cblas-sys 0.2.0",
+ "blas-sys 0.8.0",
  "libc",
  "num-complex",
 ]
 
 [[package]]
-name = "cblas-sys"
-version = "0.2.0"
+name = "blas-sys"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8354a31ad0d37f735e74c1973343c99dde4461ea8626a2b8d4fea9e06b987255"
+checksum = "b49cc48acc7ead5c33d2e3cac9c47e55bfd04c929abd1456459084a8c8cdf2cb"
 dependencies = [
  "libc",
 ]
 
 [[package]]
-name = "cblas-sys"
-version = "0.3.0"
+name = "blas-sys"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7211d558677a4f41a6c0815295cff14d798209b631d8390586efc2f6b98b0f16"
+checksum = "9a0fffd2ed9d6c2864cc0a7d17ba1f140ddfd9be1f6a7bc5359d544693a8775f"
+
+[[package]]
+name = "bytes"
+version = "1.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
 
 [[package]]
 name = "cc"
@@ -283,8 +283,8 @@ checksum = "3d3067d79b975e8844ca9eb072e16b31c3c1c36928edf9c6789548c524d0d954"
 name = "iffbdd-rs"
 version = "0.1.0"
 dependencies = [
- "cblas",
- "cblas-sys 0.3.0",
+ "blas",
+ "blas-sys 0.9.0",
  "openblas-src",
 ]
 
