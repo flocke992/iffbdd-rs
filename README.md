@@ -12,6 +12,7 @@ Some examples are provied in the `example/` directory.
 For larger problems, we encourage to use the helper struct `ProblemConfig` to setup the solver.
 
 ``` rust
+    // Example setup
     let obj = Objective::L1;
     let c1 = ConstraintSense::Less(1.0, Box::from([1.0, 0.0, 0.5, -1.0, 1.0]));
     let c2 = ConstraintSense::Greater(1.0, Box::from([0.0, 5.0, 3.0, -2.0, 0.0]));
@@ -23,7 +24,9 @@ For larger problems, we encourage to use the helper struct `ProblemConfig` to se
         objective: obj,
         constraints: vec![c1, c2, c3, c4],
     };
+    // init solver with constraints
     let mut s = init_solver_from_config(config);
+    // solve objective under constraints
     let res = s.solve(obj);
     match res {
         Ok(sol) => {
