@@ -1,0 +1,7 @@
+objective: L1
+solver: DCD
+
+constraint: 1.0 1.0 1.0 | -3.0 | Less
+constraint: 0.5 2.0 1.0 | 0.0 1.0 | Interval
+constraint: 1.0 0.5 0.0 | 5.0 | Greater
+constraint: 1.0 0.0 0.0 | -3.0 | Equal
