@@ -6,20 +6,20 @@
 //!
 //! ## Main Components
 //!
-//! ### Module [constr_optim](mod@constr_optim)
+//! ### Module [`constr_optim`:141](mod@constr_optim)
 //! This module implements the core logic of the solvers.
 //!
-//! - **ConstraintSense**: Structure representing a single constraint with its coefficients and sense.
+//! - **`ConstraintSense`**: Structure representing a single constraint with its coefficients and sense.
 //! - **Solver Trait**: Abstract interface for constraint solvers, supporting constraint addition, solving, and constraint checking.
-//! - **SecondOrderSolver**: Implements a second-order iterative filtering algorithm for constraint satisfaction. Usually requires less iterations but one iteration is more expensive.
-//! - **FirstOrderSolver**: Implements a first-order iterative algorithm for constraint satisfaction. Usually requires more iterations but one iteration is less expensive.
+//! - **`SecondOrderSolver`**: Implements a second-order iterative filtering algorithm for constraint satisfaction. Usually requires less iterations but one iteration is more expensive.
+//! - **`FirstOrderSolver`**: Implements a first-order iterative algorithm for constraint satisfaction. Usually requires more iterations but one iteration is less expensive.
 //!
 //! The algorithms are designed for efficiency and scalability, leveraging BLAS routines for linear algebra operations.
 //! ### Module [helper](mod@helper)
 //! This module provides helper methods for ease of implementation.
 //!
-//! - **SenseType**: Enumeration to specify the type of constraints (Less, Greater, Equal, Interval).
-//! - **SolverType**: Enumeration to specify the type solver
+//! - **`SenseType`**: Enumeration to specify the type of constraints (Less, Greater, Equal, Interval).
+//! - **`SolverType`**: Enumeration to specify the type solver
 //!
 //! ## Example Usage
 //!
@@ -95,7 +95,6 @@ pub mod constr_optim {
     }
 
     /// Helperfunction to do an element-wise vector-vector product. ``y = a(y dot x)``.
-    #[inline(always)]
     fn hadamard_product(y: &mut [f64], x: &[f64], a: f64) {
         y.iter_mut().zip(x).for_each(|(y_i, x_i)| *y_i *= a * x_i);
     }
@@ -103,7 +102,7 @@ pub mod constr_optim {
     /// The trait with its methods which a solver must implement. Call these to set up your problem.
     pub trait Solver {
         /// Adds a constraint to the instantiated solver.
-        /// Must pass in an ConstraintSense variant with its border ``b`` & linear mapping ``a_i``.
+        /// Must pass in an `ConstraintSense` variant with its border ``b`` & linear mapping ``a_i``.
         fn add_constraint(&mut self, constraint: ConstraintSense);
         /// Minimizes an objective subject to the given set of linear constraints.
         /// Returns Result with custom error for further problem investigations.
@@ -139,9 +138,16 @@ pub mod constr_optim {
         fn calculate_primal_posterior(&self, x_hat: &mut [f64]) {
             match self.objective {
                 Objective::L2 => unsafe {
-                    dscal(self.k as i32, -1.0, x_hat, 1);
+                    dscal(
+                        i32::try_from(self.k).unwrap_or_else(|_| {
+                            panic!("length of linear projection is bigger than i32::MAX")
+                        }),
+                        -1.0,
+                        x_hat,
+                        1,
+                    );
                 },
-                _ => {
+                Objective::L1 => {
                     hadamard_product(x_hat, &self.diag_cov, -1.0);
                 }
             }
@@ -192,10 +198,11 @@ pub mod constr_optim {
             };
             let mb_y = 0.0;
             let vb_y = 1.0;
-            let k = a_i.len() as i32;
+            let variance_store = vec![0.0; a_i.len()];
+            let k = i32::try_from(a_i.len())
+                .unwrap_or_else(|_| panic!("Length of linear projection is bigger than i32::MAX"));
             let variance_norm_store = 1.0;
             let mean_store = 0.0;
-            let variance_store = vec![0.0; k as usize];
             Constraint {
                 sense,
                 mb_y,
@@ -452,10 +459,9 @@ pub mod constr_optim {
                 if self.check_convergence_candidate() && self.check_convergence_gammas() {
                     if self.max_viol >= self.check_constraints(&self.m_x) {
                         return Ok(self.m_x.clone());
-                    } else {
-                        // Too much violation but convergence
-                        return Err(SolveError::NotFeasible(self.m_x.clone()));
                     }
+                    // Too much violation but convergence
+                    return Err(SolveError::NotFeasible(self.m_x.clone()));
                 }
             }
             // No convergence
@@ -504,7 +510,9 @@ pub mod constr_optim {
                     (a_i.to_vec(), LimitSenseLayout::Interval((b0, b1)))
                 }
             };
-            let k = a_i.len() as i32;
+            let projected_variance = vec![0.0; a_i.len()];
+            let k = i32::try_from(a_i.len())
+                .unwrap_or_else(|_| panic!("Length of linear projection bigger than i32::MAX"));
             let message_store = 1.0;
             LimitConstraint {
                 sense,
@@ -512,7 +520,7 @@ pub mod constr_optim {
                 k,
                 percision_store: 0.0,
                 message_store,
-                projected_variance: vec![0.0; k as usize],
+                projected_variance,
             }
         }
 
@@ -662,10 +670,9 @@ pub mod constr_optim {
                 if self.check_convergence_candidate() {
                     if self.max_viol >= self.check_constraints(&self.m_x) {
                         return Ok(self.m_x.clone());
-                    } else {
-                        // Too much violation, but convergence
-                        return Err(SolveError::NotFeasible(self.m_x.clone()));
                     }
+                    // Too much violation, but convergence
+                    return Err(SolveError::NotFeasible(self.m_x.clone()));
                 }
             }
             // No convergence
@@ -730,7 +737,7 @@ pub mod helper {
                     .constraints
                     .into_iter()
                     .for_each(|c| s.add_constraint(c));
-                return Box::new(s);
+                Box::new(s)
             }
             SolverType::Dcd => {
                 let mut s = FirstOrderSolver::new(k);
@@ -738,9 +745,9 @@ pub mod helper {
                     .constraints
                     .into_iter()
                     .for_each(|c| s.add_constraint(c));
-                return Box::new(s);
+                Box::new(s)
             }
-        };
+        }
     }
 
     /// method that parses file and returns the prepared solver

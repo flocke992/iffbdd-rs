@@ -1,5 +1,5 @@
 use crate::constraint_optimizer::constr_optim::{ConstraintSense, Objective};
-use crate::constraint_optimizer::helper::*;
+use crate::constraint_optimizer::helper::{ProblemConfig, SenseType, SolverType};
 use std::fs;
 use std::path::Path;
 use std::str::FromStr;
