@@ -1,6 +1,7 @@
 # iffbdd-rs
 A repository to minimize quadratic objectives under linear constraints using message-passing algorithms.
 Especially the first-order solver achieves state-of-the-art speeds. It is an implementation of the dual coordinate descent algorithm.
+
 This repo is based on my master project.
 
 ## Doc
