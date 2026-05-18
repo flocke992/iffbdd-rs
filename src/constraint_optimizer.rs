@@ -720,7 +720,8 @@ pub mod helper {
         pub constraints: Vec<ConstraintSense>,
     }
 
-    fn init_solver_from_config(config: ProblemConfig) -> Box<dyn Solver> {
+    /// method that uses [Config](struct@ProblemConfig) to initialize solver
+    pub fn init_solver_from_config(config: ProblemConfig) -> Box<dyn Solver> {
         let k = config.k;
         match config.solver {
             SolverType::Iffbdd => {
