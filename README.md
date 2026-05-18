@@ -1,5 +1,12 @@
 # iffbdd-rs
 A repository to minimize quadratic objectives under linear constraints using message-passing algorithms.
+The problem formulation is given by:
+
+$$\text{minimize}\ Q(x)\\ \text{subject to linear constraints,}$$ 
+
+where $Q(x)$ is a quadratic expression and $x\in\mathbb{R}^k$.
+
+A first-order and a second-order solver are provided.
 Especially the first-order solver achieves state-of-the-art speeds. It is an implementation of the dual coordinate descent algorithm.
 
 This repo is based on my master project.
