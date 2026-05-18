@@ -1,26 +1,29 @@
-//! # Constraint Optimizer (`constr_optim`)
+//! # Constraint Optimizer
 //!
 //! This module provides implementations of iterative algorithms for solving quadratic programming problems
-//! with linear constraints. The main goal is to find a vector `x` that minimizes the Euclidean norm
-//! (i.e., `||x||^2`) subject to a set of linear constraints of the form `a_i^T x (<=, >=, ==, [b0, b1]) b`.
+//! with linear constraints. The main goal is to find a vector `x` that minimizes the L1 or L2 norm
+//! subject to a set of linear constraints of the form `a_i^T x (<=, >=, ==, [b0, b1]) b`.
 //!
 //! ## Main Components
 //!
-//! - **SenseType & Sense**: Enumerations to specify the type and value(s) of constraints (Less, Greater, Equal, Interval).
+//! ### Module [constr_optim](mod@constr_optim)
+//! This module implements the core logic of the solvers.
+//!
 //! - **ConstraintSense**: Structure representing a single constraint with its coefficients and sense.
 //! - **Solver Trait**: Abstract interface for constraint solvers, supporting constraint addition, solving, and constraint checking.
-//! - **SecondOrderSolver**: Implements a second-order iterative filtering algorithm for constraint satisfaction. Usually requires less iterations but one iteration more expensive.
-//! - **FirstOrderSolver**: Implements a first-order iterative algorithm for constraint satisfaction. Usually requires more iterations but one iteration less expensive.
-//! - **Other Solvers**: Includes wrappers for external solvers (e.g., Gurobi) and alternative iterative approaches.
+//! - **SecondOrderSolver**: Implements a second-order iterative filtering algorithm for constraint satisfaction. Usually requires less iterations but one iteration is more expensive.
+//! - **FirstOrderSolver**: Implements a first-order iterative algorithm for constraint satisfaction. Usually requires more iterations but one iteration is less expensive.
 //!
 //! The algorithms are designed for efficiency and scalability, leveraging BLAS routines for linear algebra operations.
+//! ### Module [helper](mod@helper)
+//! This module provides helper methods for ease of implementation.
 //!
-//! > **Note:** The `inspections` submodule is excluded from this documentation as it is primarily used for algorithm visualization and diagnostics.
+//! - **SenseType**: Enumeration to specify the type of constraints (Less, Greater, Equal, Interval).
+//! - **SolverType**: Enumeration to specify the type solver
 //!
 //! ## Example Usage
 //!
 //! ```rust
-//! use constraint_optimizer::constr_optim::*;
 //!
 //! // Suppose we want to solve: minimize ||x||^2 subject to x[0] + x[1] <= 1, x[0] - x[1] >= 0
 //! let k = 2;
@@ -30,29 +33,18 @@
 //! let b2 = 0.0;
 //!
 //! // SecondOrderSolver example
-//! let mut solver2 = SecondOrderSolver::new(k);
-//! solver2.add_constraint(ConstraintSense::Less(b1, &a1));
-//! solver2.add_constraint(ConstraintSense::Greater(b2, &a2));
-//! if let Ok(x_hat) = solver2.solve() {
+//! let mut solver = SecondOrderSolver::new(k);
+//! solver.add_constraint(ConstraintSense::Less(b1, &a1));
+//! solver.add_constraint(ConstraintSense::Greater(b2, &a2));
+//! if let Ok(x_hat) = solver.solve() {
 //!     println!("SecondOrderSolver solution: {:?}", x_hat);
-//!     println!("Max constraint violation: {}", solver2.check_constraints(&x_hat));
-//! }
-//!
-//! // FirstOrderSolver example
-//! let mut solver1 = FirstOrderSolver::new(k);
-//! solver1.add_constraint(ConstraintSense::Less(b1, &a1));
-//! solver1.add_constraint(ConstraintSense::Greater(b2, &a2));
-//! if let Ok(x_hat) = solver1.solve() {
-//!     println!("FirstOrderSolver solution: {:?}", x_hat);
-//!     println!("Max constraint violation: {}", solver1.check_constraints(&x_hat));
+//!     println!("Max constraint violation: {}", solver.check_constraints(&x_hat));
 //! }
 //! ```
 
 pub mod constr_optim {
     extern crate openblas_src;
-    //ToDo: use cblas::{Layout, Transpose, daxpy, dcopy, ddot, dgemv, dger, dscal};
     use blas::{daxpy, dcopy, ddot, dgemv, dger, dscal};
-    use core::f64;
     use std::error::Error;
     use std::fmt;
 
@@ -96,7 +88,9 @@ pub mod constr_optim {
     /// Enum to express norm objective to minimize.
     #[derive(Debug, Clone, Copy, PartialEq)]
     pub enum Objective {
+        /// Minimize `||x||_1`
         L1,
+        /// Minimize `||x||_2`
         L2,
     }
 
@@ -126,6 +120,7 @@ pub mod constr_optim {
         Interval((f64, f64), (f64, f64)),
     }
 
+    /// Implements the logic of the [`Objective`](enum@Objective)
     struct Prior {
         diag_cov: Vec<f64>,
         objective: Objective,
@@ -167,7 +162,7 @@ pub mod constr_optim {
 
     /// Single constraint, which needs to be satisfied. Implements [`Self::new()`] which is called by [`Solver::add_constraint()`] to add a new constraint.
     /// [`Self::forward_filter()`], [`Self::backward_decide()`] implement the forward filter & backward decide gaussian message passing logic. They are called in the [`Solver::solve()`] method.
-    pub struct Constraint {
+    struct Constraint {
         /// Constraint sense configuration and internal parameters
         sense: SenseLayout,
         /// Backward mean message
@@ -186,7 +181,7 @@ pub mod constr_optim {
         variance_store: Vec<f64>,
     }
     impl Constraint {
-        pub fn new(constraint_sense: ConstraintSense) -> Self {
+        fn new(constraint_sense: ConstraintSense) -> Self {
             let (a_i, sense) = match constraint_sense {
                 ConstraintSense::Less(b, a_i) => (a_i.to_vec(), SenseLayout::Less(b, 0.0)),
                 ConstraintSense::Greater(b, a_i) => (a_i.to_vec(), SenseLayout::Greater(b, 0.0)),
@@ -215,7 +210,7 @@ pub mod constr_optim {
 
         /// Updates forward mean ``m_x`` and covariance message ``v_x`` based on determined backward message ``mb_y, vb_y`` in the backward decide pass.
         /// This is the standard Kalmann forward filter step.
-        pub fn forward_filter(&mut self, m_x: &mut [f64], v_x: &mut [f64], temp_vec: &mut [f64]) {
+        fn forward_filter(&mut self, m_x: &mut [f64], v_x: &mut [f64], temp_vec: &mut [f64]) {
             let mut g;
             unsafe {
                 // temp_vec = v_x @ a_i^T
@@ -265,7 +260,7 @@ pub mod constr_optim {
         }
 
         /// Updates fixed dual backward message ``x_hat`` and backward message ``mb_y, vb_y`` based on stored values from [`Self::forward_filter()`] and ``x_hat``
-        pub fn backward_decide(&mut self, x_hat: &mut [f64]) {
+        fn backward_decide(&mut self, x_hat: &mut [f64]) {
             let m_y;
             unsafe {
                 // m_y = a_i @ m_x - a_i @ v_x @ x_hat
@@ -334,7 +329,7 @@ pub mod constr_optim {
         }
 
         /// checks violation of constraint
-        pub fn check_constraint(&self, x_hat: &[f64]) -> f64 {
+        fn check_constraint(&self, x_hat: &[f64]) -> f64 {
             let y_hat;
             unsafe {
                 y_hat = ddot(self.k, &self.a_i[..], 1, x_hat, 1);
@@ -458,12 +453,12 @@ pub mod constr_optim {
                     if self.max_viol >= self.check_constraints(&self.m_x) {
                         return Ok(self.m_x.clone());
                     } else {
-                        println!("too much violation");
+                        // Too much violation but convergence
                         return Err(SolveError::NotFeasible(self.m_x.clone()));
                     }
                 }
             }
-            println!("No convergence");
+            // No convergence
             Err(SolveError::NoConvergence)
         }
 
@@ -668,10 +663,12 @@ pub mod constr_optim {
                     if self.max_viol >= self.check_constraints(&self.m_x) {
                         return Ok(self.m_x.clone());
                     } else {
+                        // Too much violation, but convergence
                         return Err(SolveError::NotFeasible(self.m_x.clone()));
                     }
                 }
             }
+            // No convergence
             Err(SolveError::NoConvergence)
         }
 
@@ -685,21 +682,23 @@ pub mod constr_optim {
 }
 
 pub mod helper {
-    use std::path::Path;
-
     use crate::ConstraintSense;
     use crate::Solver;
-    use crate::constraint_optimizer::constr_optim::FirstOrderSolver;
-    use crate::constraint_optimizer::constr_optim::Objective;
-    use crate::constraint_optimizer::constr_optim::SecondOrderSolver;
-    use crate::file_parser::ParseError;
-    use crate::file_parser::parse_problem_file;
+    use crate::constraint_optimizer::constr_optim::{
+        FirstOrderSolver, Objective, SecondOrderSolver,
+    };
+    use crate::file_parser::{ParseError, parse_problem_file};
+    use std::path::Path;
+    /// What type of
     #[derive(Debug, Clone, PartialEq)]
     pub enum SolverType {
+        /// Second-order Solver
         Iffbdd,
+        /// First-order Solver
         Dcd,
     }
 
+    /// Available types of constraints
     #[derive(Debug, Clone, PartialEq)]
     pub enum SenseType {
         Less,
@@ -708,11 +707,16 @@ pub mod helper {
         Interval,
     }
 
+    /// Object to that holds info to initialize a problem
     #[derive(Debug)]
     pub struct ProblemConfig {
+        /// Which solver to use
         pub solver: SolverType,
+        /// Which objective to minimize
         pub objective: Objective,
+        /// dimension of `x`
         pub k: usize,
+        /// Contains the linear constraints
         pub constraints: Vec<ConstraintSense>,
     }
 
@@ -738,6 +742,7 @@ pub mod helper {
         };
     }
 
+    /// method that parses file and returns the prepared solver
     pub fn init_from_file(
         path: impl AsRef<Path>,
     ) -> Result<(Objective, Box<dyn Solver>), ParseError> {
