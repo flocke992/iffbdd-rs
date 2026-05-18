@@ -19,7 +19,7 @@ For larger problems, we encourage to use the helper struct `ProblemConfig` to se
     let c4 = ConstraintSense::Less(1.0, Box::from([-1.0, -0.5, 0.5, 1.5, 1.0]));
     let config = ProblemConfig {
         k: 5,
-        solver: SolverType::Dcd,
+        solver: SolverType::Dcd, //First-order solver
         objective: obj,
         constraints: vec![c1, c2, c3, c4],
     };
