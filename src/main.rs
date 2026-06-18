@@ -1,8 +1,12 @@
 mod constraint_optimizer;
 mod file_parser;
+mod performance;
 
 use constraint_optimizer::constr_optim::*;
 use constraint_optimizer::helper::*;
+
+use crate::performance::observe_single_solver;
+use crate::performance::{generate_feasible_constraints, repeat_experiment, write_csv};
 
 fn main() {
     println!("Solve ex3:");
@@ -73,4 +77,59 @@ fn main() {
             println!("{e:?}");
         }
     }
+
+    let k = 10_usize;
+
+    let constr = generate_feasible_constraints(k, k, SenseType::Less);
+    println!("{constr:?}");
+    let conf = ProblemConfig {
+        solver: SolverType::Dcd,
+        objective: Objective::L2,
+        k,
+        constraints: constr,
+    };
+
+    let mut s = init_solver_from_config(conf);
+    match s.solve(Objective::L2) {
+        Ok(x) => {
+            println!("Success");
+            println!("{x:.4?}");
+        }
+        Err(e) => {
+            println!("No Success");
+            println!("{e:?}");
+        }
+    }
+
+    // let k_n = vec![
+    //     (5, 1),
+    //     (10, 2),
+    //     (30, 6),
+    //     (50, 10),
+    //     (100, 20),
+    //     (300, 60),
+    //     (500, 100),
+    // ];
+    // let k_n = vec![
+    //     (5, 5),
+    //     (10, 10),
+    //     (30, 30),
+    //     (50, 50),
+    //     (100, 100),
+    //     (300, 300),
+    //     (500, 500),
+    // ];
+    //
+    // let solvers = vec![SolverType::Iffbdd, SolverType::Dcd];
+    // let objectives = vec![Objective::L2];
+    //
+    // let repetitions = 80;
+    // for s in &solvers {
+    //     for o in &objectives {
+    //         let res = observe_single_solver(&k_n, SenseType::Less, *o, repetitions, *s);
+    //         // let res = observe_single_solver(&k_n, SenseType::Equal, *o, repetitions, *s);
+    //         let names = k_n.iter().map(|(k, _n)| k.to_string()).collect();
+    //         let _ = write_csv(&format!("single_{s}_{o}.csv",), names, res);
+    //     }
+    // }
 }

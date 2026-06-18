@@ -46,7 +46,7 @@ pub mod constr_optim {
     extern crate openblas_src;
     use blas::{daxpy, dcopy, ddot, dgemv, dger, dscal};
     use std::error::Error;
-    use std::fmt;
+    use std::fmt::{self, Display, write};
 
     /// Enum to express constraint, must contain the wanted border ``b`` / ``b0,b1`` and the linear mapping ``a_i`` as a slice.
     /// The caller ensures correct dimensions.
@@ -65,7 +65,7 @@ pub mod constr_optim {
         NoConvergence,
         /// The solver did converge but the maximum violation [`Solver::check_constraints()`] was larger than ``max_violation``.
         /// Maybe one can still continue with the produced candidate ``x_hat``.
-        NotFeasible(Vec<f64>),
+        NotFeasible(f64, Vec<f64>),
     }
     #[doc(hidden)]
     impl fmt::Display for SolveError {
@@ -75,9 +75,9 @@ pub mod constr_optim {
                     f,
                     "The algorithm did not converge in the maximum allowed iterations. Maybe try increasing the number of iterations."
                 ),
-                SolveError::NotFeasible(_) => write!(
+                SolveError::NotFeasible(viol, _) => write!(
                     f,
-                    "The algorithm did converge, but the maximum violation is outside the allowed range. Maybe try increasing the tolerance."
+                    "The algorithm did converge, but the maximum violation is outside the allowed range: {viol:.3}. Maybe try increasing the tolerance."
                 ),
             }
         }
@@ -86,7 +86,7 @@ pub mod constr_optim {
     impl Error for SolveError {}
 
     /// Enum to express norm objective to minimize.
-    #[derive(Debug, Clone, Copy, PartialEq)]
+    #[derive(Debug, Copy, Clone, PartialEq, Eq)]
     pub enum Objective {
         /// Minimize `||x||_1`
         L1,
@@ -94,7 +94,16 @@ pub mod constr_optim {
         L2,
     }
 
-    /// Helperfunction to do an element-wise vector-vector product. ``y = a(y dot x)``.
+    impl Display for Objective {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            match self {
+                Objective::L1 => write!(f, "L1"),
+                Objective::L2 => write!(f, "L2"),
+            }
+        }
+    }
+
+    /// Helper function to do an element-wise vector-vector product. ``y = a(y dot x)``.
     fn hadamard_product(y: &mut [f64], x: &[f64], a: f64) {
         y.iter_mut().zip(x).for_each(|(y_i, x_i)| *y_i *= a * x_i);
     }
@@ -167,7 +176,7 @@ pub mod constr_optim {
     }
 
     /// Single constraint, which needs to be satisfied. Implements [`Self::new()`] which is called by [`Solver::add_constraint()`] to add a new constraint.
-    /// [`Self::forward_filter()`], [`Self::backward_decide()`] implement the forward filter & backward decide gaussian message passing logic. They are called in the [`Solver::solve()`] method.
+    /// [`Self::forward_filter()`], [`Self::backward_decide()`] implement the forward filter & backward decide Gaussian message passing logic. They are called in the [`Solver::solve()`] method.
     struct Constraint {
         /// Constraint sense configuration and internal parameters
         sense: SenseLayout,
@@ -215,8 +224,8 @@ pub mod constr_optim {
             }
         }
 
-        /// Updates forward mean ``m_x`` and covariance message ``v_x`` based on determined backward message ``mb_y, vb_y`` in the backward decide pass.
-        /// This is the standard Kalmann forward filter step.
+        /// Updates forward mean ``m_x`` and covariance message ``v_x`` based on determined backward message ``mb_y, vb_y`` in the backward pass.
+        /// This is the standard Kalman forward filter step.
         fn forward_filter(&mut self, m_x: &mut [f64], v_x: &mut [f64], temp_vec: &mut [f64]) {
             let mut g;
             unsafe {
@@ -249,7 +258,7 @@ pub mod constr_optim {
                 g = 1.0 / (self.vb_y + g);
 
                 unsafe {
-                    //update m_x
+                    //Update m_x
                     //m_x = m_x + v_x @ a_i^T * g * (mb_y - a_i @ m_x)
                     daxpy(
                         self.k,
@@ -259,7 +268,7 @@ pub mod constr_optim {
                         m_x,
                         1,
                     );
-                    //update v_x
+                    //Update v_x
                     //v_x = v_x - g * (v_x @ a_i^T) @ (v_x @ a_i^T)^T
                     dger(self.k, self.k, -g, temp_vec, 1, temp_vec, 1, v_x, self.k);
                 }
@@ -273,7 +282,7 @@ pub mod constr_optim {
                 // m_y = a_i @ m_x - a_i @ v_x @ x_hat
                 m_y = self.mean_store - ddot(self.k, &self.variance_store, 1, x_hat, 1);
             }
-            // updates mb_y, vb_y & x_hat according to update table
+            // Updates mb_y, vb_y & x_hat according to update table
             match self.sense {
                 SenseLayout::Less(b, ref mut g0) => {
                     if m_y <= b {
@@ -350,7 +359,7 @@ pub mod constr_optim {
         }
     }
 
-    /// Second-order solver which impelments the [`Solver`] trait.
+    /// Second-order solver which implements the [`Solver`] trait.
     pub struct SecondOrderSolver {
         /// Vector of stored [`Constraint`]s
         constraints: Vec<Constraint>,
@@ -362,16 +371,16 @@ pub mod constr_optim {
         v_x: Vec<f64>,
         /// Allocated vector to use for intermediate computations.
         temp_vec: Vec<f64>,
-        /// old norm of candidate solution to check for convergence.
+        /// Old norm of candidate solution to check for convergence.
         old_x_hat_norm: f64,
-        /// old norm of internal parameters to check for convergence.
+        /// Old norm of internal parameters to check for convergence.
         old_gammas_norm: f64,
-        //hyperparams
+        // Hyperparameters
         /// Convergence tolerance between ``|old_value - new_value|``.
         convergence_tol: f64,
         /// Maximum number of iterations for algorithm until convergence must be met.
         max_iter: usize,
-        /// Maximum allowed constraint violation before declaring infeasibility.
+        /// Maximum allowed constraint violation before declaring the problem infeasible.
         max_viol: f64,
     }
 
@@ -418,12 +427,11 @@ pub mod constr_optim {
             res
         }
 
-        /// Internal helper method to reset gaussian messages.
+        /// Internal helper method to reset Gaussian messages.
         fn reset_forward_message(&mut self, diag_prior: &[f64]) {
             self.m_x.fill(0.0);
             self.v_x.fill(0.0);
-            //fill diagonal elements
-            //(0..self.k).for_each(|i| self.v_x[i * self.k + i] = 1.0);
+            //Fill diagonal elements
             (0..self.k).for_each(|i| self.v_x[i * self.k + i] = diag_prior[i]);
         }
     }
@@ -438,7 +446,7 @@ pub mod constr_optim {
             let mut prior = Prior::new(self.k, objective);
             for _i in 0..self.max_iter {
                 self.reset_forward_message(&prior.diag_cov);
-                //forward Kalmann filter
+                //forward Kalman filter
                 self.constraints.iter_mut().for_each(|c| {
                     c.forward_filter(&mut self.m_x, &mut self.v_x, &mut self.temp_vec);
                 });
@@ -451,17 +459,18 @@ pub mod constr_optim {
                     .rev()
                     .for_each(|c| c.backward_decide(&mut self.m_x));
 
-                //determine posterior primal and update prior based on that posterior
+                //Determine posterior primal and update prior based on that posterior
                 prior.calculate_primal_posterior(&mut self.m_x);
                 prior.update_prior(&self.m_x);
 
                 //check for convergence
                 if self.check_convergence_candidate() && self.check_convergence_gammas() {
-                    if self.max_viol >= self.check_constraints(&self.m_x) {
+                    let viol = self.check_constraints(&self.m_x);
+                    if self.max_viol >= viol {
                         return Ok(self.m_x.clone());
                     }
                     // Too much violation but convergence
-                    return Err(SolveError::NotFeasible(self.m_x.clone()));
+                    return Err(SolveError::NotFeasible(viol, self.m_x.clone()));
                 }
             }
             // No convergence
@@ -484,19 +493,19 @@ pub mod constr_optim {
     }
 
     /// Single constraint, which needs to be satisfied. Implements [`Self::new()`] which is called by [`Solver::add_constraint()`] to add a new constraint.
-    /// [`Self::forward_filter()`], [`Self::backward_decide()`] implement the forward filter & backward decide gaussian message passing logic. They are called in the [`Solver::solve()`] method.
+    /// [`Self::forward_filter()`], [`Self::backward_decide()`] implement the forward filter & backward decide Gaussian message passing logic. They are called in the [`Solver::solve()`] method.
     struct LimitConstraint {
         /// Constraint sense configuration and internal parameters
         sense: LimitSenseLayout,
-        /// linear mapping ``a_i``
+        /// Linear mapping ``a_i``
         a_i: Vec<f64>,
-        /// dimension of ``x_hat`` and ``a_i``
+        /// Dimension of ``x_hat`` and ``a_i``
         k: i32,
-        /// precomputed stored value ``1/(a_i @ a_i^T)`` to use in [`Self::backward_decide()`]
+        /// Precomputed stored value ``1/(a_i @ a_i^T)`` to use in [`Self::backward_decide()`]
         percision_store: f64,
-        /// allocated field to store forward and backward messages respectively
+        /// Allocated field to store forward and backward messages respectively
         message_store: f64,
-        /// allocated vec to store ``V_x @ a_i^T``
+        /// Allocated Vec to store ``V_x @ a_i^T``
         projected_variance: Vec<f64>,
     }
 
@@ -528,17 +537,17 @@ pub mod constr_optim {
         fn forward_filter(&mut self, m_x: &mut [f64], v_x: &[f64]) {
             let z_hat = self.message_store;
             unsafe {
-                //store a_i @ v_x
+                //Store a_i @ v_x
                 dcopy(self.k, &self.a_i, 1, &mut self.projected_variance, 1);
                 hadamard_product(&mut self.projected_variance, v_x, 1.0);
-                //store a_i @ v_x @ a_i^T
+                //Store a_i @ v_x @ a_i^T
                 self.percision_store =
                     ddot(self.k, &self.a_i, 1, &self.projected_variance, 1).recip();
-                //store a_i @ m_x for backward decide
+                //Store a_i @ m_x for backward decide
                 self.message_store = ddot(self.k, m_x, 1, &self.a_i, 1);
             }
             if z_hat != 0.0 {
-                //update m_x if previous decided variable z_hat is nonzero.
+                //Update m_x if previous decided variable z_hat is nonzero.
                 //m_x = m_x - a_i^T * z_hat
                 unsafe {
                     daxpy(self.k, -z_hat, &self.projected_variance, 1, m_x, 1);
@@ -577,7 +586,7 @@ pub mod constr_optim {
             }
 
             if self.message_store != 0.0 {
-                // update x_hat = x_hat + a_i^T * z_hat if necessary
+                // Update x_hat = x_hat + a_i^T * z_hat if necessary
                 unsafe {
                     daxpy(self.k, self.message_store, &self.a_i, 1, x_hat, 1);
                 }
@@ -598,45 +607,37 @@ pub mod constr_optim {
         }
     }
 
-    /// First-order solver which impelments the [`Solver`] trait.
+    /// First-order solver which implements the [`Solver`] trait.
     pub struct FirstOrderSolver {
-        /// Vector of [`Constraint`]s.
         constraints: Vec<LimitConstraint>,
-        /// Dimension of ``x_hat``.
         k: usize,
-        /// Forward mean message.
         m_x: Vec<f64>,
-        /// Old norm of candidate solution to check for convergence.
-        old_x_hat_norm: f64,
-        //hyperparams
-        /// Convergence tolerance between ``|old_value - new_value|``.
         convergence_tol: f64,
-        /// Maximum number of iterations for algorithm until convergence must be met.
+        old_norm: f64,
         max_iter: usize,
-        /// Maximum allowed constraint violation before declaring infeasibility.
-        max_viol: f64,
+        max_tol: f64,
     }
 
     impl FirstOrderSolver {
         /// Call this method to instantiate a new first-order solver.
         pub fn new(k: usize) -> Self {
             let m_x = vec![0.0; k];
-            Self {
+            FirstOrderSolver {
                 constraints: Vec::new(),
                 k,
                 m_x,
                 convergence_tol: 1e-12,
-                old_x_hat_norm: f64::MAX,
+                old_norm: f64::MAX,
                 max_iter: 5_000_000,
-                max_viol: 1e-8,
+                max_tol: 1e-6,
             }
         }
 
         /// Internal method to check if (`x_hat`) has converged.
         fn check_convergence_candidate(&mut self) -> bool {
             let x_hat_norm = self.m_x.iter().fold(0.0, |acc, x_i| acc + x_i.powi(2));
-            let res = (x_hat_norm - self.old_x_hat_norm).abs() < self.convergence_tol;
-            self.old_x_hat_norm = x_hat_norm;
+            let res = (x_hat_norm - self.old_norm).abs() < self.convergence_tol;
+            self.old_norm = x_hat_norm;
             res
         }
     }
@@ -651,7 +652,7 @@ pub mod constr_optim {
             let mut prior = Prior::new(self.k, objective);
             for _i in 0..self.max_iter {
                 self.m_x.fill(0.0);
-                //simplified forward Kalamann filter
+                //simplified forward Kalman filter
                 self.constraints
                     .iter_mut()
                     .for_each(|c| c.forward_filter(&mut self.m_x, &prior.diag_cov));
@@ -668,11 +669,12 @@ pub mod constr_optim {
                 prior.update_prior(&self.m_x);
 
                 if self.check_convergence_candidate() {
-                    if self.max_viol >= self.check_constraints(&self.m_x) {
+                    let viol = self.check_constraints(&self.m_x);
+                    if self.max_tol >= viol {
                         return Ok(self.m_x.clone());
                     }
                     // Too much violation, but convergence
-                    return Err(SolveError::NotFeasible(self.m_x.clone()));
+                    return Err(SolveError::NotFeasible(viol, self.m_x.clone()));
                 }
             }
             // No convergence
@@ -680,7 +682,7 @@ pub mod constr_optim {
         }
 
         fn check_constraints(&self, x_hat: &[f64]) -> f64 {
-            //infinity norm of violated border per constraint
+            //Infinity norm of violated border per constraint
             self.constraints
                 .iter()
                 .fold(0.0, |acc, c| acc.max(c.check_constraint(x_hat)))
@@ -695,9 +697,10 @@ pub mod helper {
         FirstOrderSolver, Objective, SecondOrderSolver,
     };
     use crate::file_parser::{ParseError, parse_problem_file};
+    use std::fmt::Display;
     use std::path::Path;
     /// What type of
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Copy, Clone, PartialEq)]
     pub enum SolverType {
         /// Second-order Solver
         Iffbdd,
@@ -705,8 +708,17 @@ pub mod helper {
         Dcd,
     }
 
+    impl Display for SolverType {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                SolverType::Iffbdd => write!(f, "Iffbdd"),
+                SolverType::Dcd => write!(f, "Dcd"),
+            }
+        }
+    }
+
     /// Available types of constraints
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, PartialEq, Copy)]
     pub enum SenseType {
         Less,
         Greater,
@@ -715,7 +727,7 @@ pub mod helper {
     }
 
     /// Object to that holds info to initialize a problem
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     pub struct ProblemConfig {
         /// Which solver to use
         pub solver: SolverType,
@@ -727,7 +739,7 @@ pub mod helper {
         pub constraints: Vec<ConstraintSense>,
     }
 
-    /// method that uses [Config](struct@ProblemConfig) to initialize solver
+    /// Method that uses [Config](struct@ProblemConfig) to initialize solver
     pub fn init_solver_from_config(config: ProblemConfig) -> Box<dyn Solver> {
         let k = config.k;
         match config.solver {
@@ -750,7 +762,7 @@ pub mod helper {
         }
     }
 
-    /// method that parses file and returns the prepared solver
+    /// Method that parses file and returns the prepared solver
     pub fn init_from_file(
         path: impl AsRef<Path>,
     ) -> Result<(Objective, Box<dyn Solver>), ParseError> {

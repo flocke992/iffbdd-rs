@@ -48,3 +48,10 @@ For larger problems, we encourage to use the helper struct `ProblemConfig` to se
     }
 
 ```
+
+## Performance
+We repeat the experiment for the given dimensions $k$ & $n$ serveral times and plot the different timed runs as a violine plot.
+### Half-Space Constraints
+![./l2_ineq.pdf]
+### Equality Constraints
+![./l2_eq.pdf]
